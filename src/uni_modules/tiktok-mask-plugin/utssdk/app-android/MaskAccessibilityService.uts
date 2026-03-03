@@ -147,7 +147,7 @@ export class MaskAccessibilityService extends AccessibilityService {
 
     // 创建透明 View
     this.maskView = new View(this);
-    this.maskView!.setBackgroundColor(Color.TRANSPARENT);
+    this.maskView!.setBackgroundColor(Color.parseColor("#02000000"));
 
     // 设置触摸事件监听 —— 核心手势过滤逻辑
     this.maskView!.setOnTouchListener(new MaskTouchListener(service));
@@ -179,20 +179,21 @@ export class MaskAccessibilityService extends AccessibilityService {
     this.panelView!.setOrientation(LinearLayout.VERTICAL);
     this.panelView!.setPadding(dp(16), dp(12), dp(16), dp(12));
 
-    // 面板背景 —— 圆角深色半透明
+    // 面板背景 —— 纯白圆角设定
     const panelBg = new GradientDrawable();
-    panelBg.setColor(Color.parseColor("#DD1a1a2e"));
-    panelBg.setCornerRadius(dp(20).toFloat());
-    panelBg.setStroke(dp(2), Color.parseColor("#4DFFFFFF"));
+    panelBg.setColor(Color.parseColor("#FAFFFFFF"));
+    panelBg.setCornerRadius(dp(24).toFloat());
+    panelBg.setStroke(dp(1), Color.parseColor("#1A000000"));
     this.panelView!.setBackground(panelBg);
 
     // 标题
     const title = new TextView(this);
     title.setText("📺 控制面板");
-    title.setTextColor(Color.WHITE);
+    title.setTextColor(Color.parseColor("#333333"));
     title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18.0.toFloat());
     title.setGravity(Gravity.CENTER);
-    title.setPadding(0, 0, 0, dp(8));
+    title.setPadding(0, 0, 0, dp(12));
+    title.getPaint().setFakeBoldText(true);
     this.panelView!.addView(title);
 
     // 按钮数据
@@ -208,7 +209,7 @@ export class MaskAccessibilityService extends AccessibilityService {
       const btn = this.createPanelButton(btnData.text as string, btnData.action as string, dp);
       const btnParams = new LinearLayout.LayoutParams(
         dp(180),
-        dp(56)
+        dp(52)
       );
       btnParams.setMargins(0, dp(6), 0, dp(6));
       btn.setLayoutParams(btnParams);
@@ -239,18 +240,19 @@ export class MaskAccessibilityService extends AccessibilityService {
     const service = this;
     const btn = new Button(this);
     btn.setText(text);
-    btn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20.0.toFloat());
-    btn.setTextColor(Color.WHITE);
+    btn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18.0.toFloat());
     btn.setAllCaps(false);
 
     // 按钮背景
     const btnBg = new GradientDrawable();
     if (action == "exit") {
-      btnBg.setColor(Color.parseColor("#CC_E74C3C"));
+      btnBg.setColor(Color.parseColor("#FFFBEB"));
+      btn.setTextColor(Color.parseColor("#EF4444")); // 红色文本
     } else {
-      btnBg.setColor(Color.parseColor("#CC_3498DB"));
+      btnBg.setColor(Color.parseColor("#F3F4F6"));
+      btn.setTextColor(Color.parseColor("#374151")); // 深灰文本
     }
-    btnBg.setCornerRadius(dp(12).toFloat());
+    btnBg.setCornerRadius(dp(26).toFloat());
     btn.setBackground(btnBg);
 
     btn.setOnClickListener(new PanelButtonClickListener(service, action));
