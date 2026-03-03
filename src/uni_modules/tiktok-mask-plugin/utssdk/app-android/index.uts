@@ -1,0 +1,182 @@
+import Context from "android.content.Context";
+import Intent from "android.content.Intent";
+import Settings from "android.provider.Settings";
+import Uri from "android.net.Uri";
+import AudioManager from "android.media.AudioManager";
+import ComponentName from "android.content.ComponentName";
+import Build from "android.os.Build";
+import { MaskAccessibilityService } from "./MaskAccessibilityService";
+
+/**
+ * 检查无障碍服务是否已开启
+ */
+export function isAccessibilityEnabled(): boolean {
+  const context = UTSAndroid.getAppContext()!;
+  const serviceName = context.getPackageName() + "/.MaskAccessibilityService";
+
+  let accessibilityEnabled = 0;
+  try {
+    accessibilityEnabled = Settings.Secure.getInt(
+      context.getContentResolver(),
+      Settings.Secure.ACCESSIBILITY_ENABLED
+    );
+  } catch (e) {
+    return false;
+  }
+
+  if (accessibilityEnabled != 1) {
+    return false;
+  }
+
+  const settingValue = Settings.Secure.getString(
+    context.getContentResolver(),
+    Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+  );
+
+  if (settingValue == null) {
+    return false;
+  }
+
+  const services = settingValue.split(":");
+  for (const componentNameString of services) {
+    const enabledService = ComponentName.unflattenFromString(componentNameString);
+    if (enabledService != null) {
+      const packageName = context.getPackageName();
+      if (enabledService.getPackageName() == packageName) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+/**
+ * 打开系统无障碍设置页面
+ */
+export function openAccessibilitySettings(): void {
+  const context = UTSAndroid.getAppContext()!;
+  const intent = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
+  intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+  context.startActivity(intent);
+}
+
+/**
+ * 检查悬浮窗权限
+ */
+export function canDrawOverlays(): boolean {
+  const context = UTSAndroid.getAppContext()!;
+  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+    return Settings.canDrawOverlays(context);
+  }
+  return true;
+}
+
+/**
+ * 请求悬浮窗权限
+ */
+export function requestOverlayPermission(): void {
+  const context = UTSAndroid.getAppContext()!;
+  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+    const intent = new Intent(
+      Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+      Uri.parse("package:" + context.getPackageName())
+    );
+    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+    context.startActivity(intent);
+  }
+}
+
+/**
+ * 启动蒙层服务（通知无障碍服务显示蒙层）
+ */
+export function startMask(): void {
+  const context = UTSAndroid.getAppContext()!;
+  const intent = new Intent("com.tiktok.mask.ACTION_START_MASK");
+  intent.setPackage(context.getPackageName());
+  context.sendBroadcast(intent);
+}
+
+/**
+ * 停止蒙层服务
+ */
+export function stopMask(): void {
+  const context = UTSAndroid.getAppContext()!;
+  const intent = new Intent("com.tiktok.mask.ACTION_STOP_MASK");
+  intent.setPackage(context.getPackageName());
+  context.sendBroadcast(intent);
+}
+
+/**
+ * 设置媒体音量
+ * @param level 音量等级 0-15
+ */
+export function setVolume(level: number): void {
+  const context = UTSAndroid.getAppContext()!;
+  const audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager;
+  const maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+  const targetLevel = Math.min(Math.max(0, level), maxVolume);
+  audioManager.setStreamVolume(
+    AudioManager.STREAM_MUSIC,
+    targetLevel.toInt(),
+    AudioManager.FLAG_SHOW_UI
+  );
+}
+
+/**
+ * 获取当前媒体音量
+ */
+export function getVolume(): number {
+  const context = UTSAndroid.getAppContext()!;
+  const audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager;
+  return audioManager.getStreamVolume(AudioManager.STREAM_MUSIC);
+}
+
+/**
+ * 获取最大媒体音量
+ */
+export function getMaxVolume(): number {
+  const context = UTSAndroid.getAppContext()!;
+  const audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager;
+  return audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+}
+
+/**
+ * 音量增加
+ */
+export function volumeUp(): void {
+  const context = UTSAndroid.getAppContext()!;
+  const audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager;
+  audioManager.adjustStreamVolume(
+    AudioManager.STREAM_MUSIC,
+    AudioManager.ADJUST_RAISE,
+    AudioManager.FLAG_SHOW_UI
+  );
+}
+
+/**
+ * 音量减少
+ */
+export function volumeDown(): void {
+  const context = UTSAndroid.getAppContext()!;
+  const audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager;
+  audioManager.adjustStreamVolume(
+    AudioManager.STREAM_MUSIC,
+    AudioManager.ADJUST_LOWER,
+    AudioManager.FLAG_SHOW_UI
+  );
+}
+
+/**
+ * 检查蒙层是否正在运行
+ */
+export function isMaskRunning(): boolean {
+  return MaskAccessibilityService.isMaskShowing;
+}
+
+/**
+ * 设置密码到原生层（用于悬浮面板验证）
+ */
+export function setNativePassword(password: string): void {
+  MaskAccessibilityService.unlockPassword = password;
+}

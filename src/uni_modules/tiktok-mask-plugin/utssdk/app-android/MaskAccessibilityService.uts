@@ -1,0 +1,633 @@
+import AccessibilityService from "android.accessibilityservice.AccessibilityService";
+import AccessibilityEvent from "android.view.accessibility.AccessibilityEvent";
+import WindowManager from "android.view.WindowManager";
+import LayoutParams from "android.view.WindowManager.LayoutParams";
+import View from "android.view.View";
+import MotionEvent from "android.view.MotionEvent";
+import GestureDescription from "android.accessibilityservice.GestureDescription";
+import Path from "android.graphics.Path";
+import Color from "android.graphics.Color";
+import Gravity from "android.view.Gravity";
+import PixelFormat from "android.graphics.PixelFormat";
+import LinearLayout from "android.widget.LinearLayout";
+import Button from "android.widget.Button";
+import TextView from "android.widget.TextView";
+import EditText from "android.widget.EditText";
+import AlertDialog from "android.app.AlertDialog";
+import DialogInterface from "android.content.DialogInterface";
+import TypedValue from "android.util.TypedValue";
+import InputType from "android.text.InputType";
+import BroadcastReceiver from "android.content.BroadcastReceiver";
+import Context from "android.content.Context";
+import Intent from "android.content.Intent";
+import IntentFilter from "android.content.IntentFilter";
+import AudioManager from "android.media.AudioManager";
+import Build from "android.os.Build";
+import Handler from "android.os.Handler";
+import Looper from "android.os.Looper";
+import GradientDrawable from "android.graphics.drawable.GradientDrawable";
+import StateListDrawable from "android.graphics.drawable.StateListDrawable";
+
+/**
+ * 蒙层无障碍服务
+ * 核心功能：
+ * 1. 在屏幕上覆盖透明蒙层，拦截点击事件
+ * 2. 识别并放行垂直滑动手势
+ * 3. 显示悬浮控制面板
+ */
+export class MaskAccessibilityService extends AccessibilityService {
+
+  constructor() {
+    super();
+  }
+
+  /** 蒙层是否正在显示 */
+  static isMaskShowing: boolean = false;
+  /** 解锁密码 */
+  static unlockPassword: string = "";
+
+  /** 蒙层 View */
+  private maskView: View | null = null;
+  /** 控制面板 */
+  private panelView: LinearLayout | null = null;
+  /** WindowManager */
+  private wm: WindowManager | null = null;
+  /** 广播接收器 */
+  private receiver: BroadcastReceiver | null = null;
+  /** Handler */
+  private handler: Handler | null = null;
+
+  /** 手势起始坐标 */
+  private startX: number = 0;
+  private startY: number = 0;
+  /** 手势识别阈值（像素） */
+  private readonly SWIPE_THRESHOLD: number = 100;
+  /** 面板拖动相关 */
+  private panelStartX: number = 0;
+  private panelStartY: number = 0;
+  private panelParams: LayoutParams | null = null;
+  private isDraggingPanel: boolean = false;
+
+  override onServiceConnected(): void {
+    super.onServiceConnected();
+    this.handler = new Handler(Looper.getMainLooper());
+    this.wm = this.getSystemService(Context.WINDOW_SERVICE) as WindowManager;
+    this.registerMaskReceiver();
+  }
+
+  override onAccessibilityEvent(event: AccessibilityEvent): void {
+    // 不需要处理无障碍事件
+  }
+
+  override onInterrupt(): void {
+    // 服务中断
+  }
+
+  override onDestroy(): void {
+    this.removeMask();
+    this.unregisterMaskReceiver();
+    super.onDestroy();
+  }
+
+  /**
+   * 注册广播接收器，接收来自 UniApp 层的控制指令
+   */
+  private registerMaskReceiver(): void {
+    const service = this;
+    this.receiver = new MaskBroadcastReceiver(service);
+    const filter = new IntentFilter();
+    filter.addAction("com.tiktok.mask.ACTION_START_MASK");
+    filter.addAction("com.tiktok.mask.ACTION_STOP_MASK");
+
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+      this.registerReceiver(this.receiver, filter, Context.RECEIVER_NOT_EXPORTED);
+    } else {
+      this.registerReceiver(this.receiver, filter);
+    }
+  }
+
+  private unregisterMaskReceiver(): void {
+    if (this.receiver != null) {
+      this.unregisterReceiver(this.receiver!);
+      this.receiver = null;
+    }
+  }
+
+  /**
+   * 显示蒙层和控制面板
+   */
+  showMask(): void {
+    if (MaskAccessibilityService.isMaskShowing) return;
+
+    this.createMaskView();
+    this.createPanelView();
+    MaskAccessibilityService.isMaskShowing = true;
+  }
+
+  /**
+   * 移除蒙层和控制面板
+   */
+  removeMask(): void {
+    if (this.maskView != null) {
+      this.wm?.removeView(this.maskView!);
+      this.maskView = null;
+    }
+    if (this.panelView != null) {
+      this.wm?.removeView(this.panelView!);
+      this.panelView = null;
+    }
+    MaskAccessibilityService.isMaskShowing = false;
+  }
+
+  /**
+   * 创建全屏透明蒙层
+   */
+  private createMaskView(): void {
+    const service = this;
+
+    // 创建透明 View
+    this.maskView = new View(this);
+    this.maskView!.setBackgroundColor(Color.TRANSPARENT);
+
+    // 设置触摸事件监听 —— 核心手势过滤逻辑
+    this.maskView!.setOnTouchListener(new MaskTouchListener(service));
+
+    // LayoutParams
+    const params = new LayoutParams(
+      LayoutParams.MATCH_PARENT,
+      LayoutParams.MATCH_PARENT,
+      LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+      LayoutParams.FLAG_NOT_FOCUSABLE |
+      LayoutParams.FLAG_LAYOUT_IN_SCREEN |
+      LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+      PixelFormat.TRANSLUCENT
+    );
+
+    this.wm?.addView(this.maskView!, params);
+  }
+
+  /**
+   * 创建悬浮控制面板
+   */
+  private createPanelView(): void {
+    const service = this;
+    const density = this.getResources().getDisplayMetrics().density;
+    const dp = (value: number): Int => (value * density).toInt();
+
+    // 面板容器
+    this.panelView = new LinearLayout(this);
+    this.panelView!.setOrientation(LinearLayout.VERTICAL);
+    this.panelView!.setPadding(dp(16), dp(12), dp(16), dp(12));
+
+    // 面板背景 —— 圆角深色半透明
+    const panelBg = new GradientDrawable();
+    panelBg.setColor(Color.parseColor("#DD1a1a2e"));
+    panelBg.setCornerRadius(dp(20).toFloat());
+    panelBg.setStroke(dp(2), Color.parseColor("#4DFFFFFF"));
+    this.panelView!.setBackground(panelBg);
+
+    // 标题
+    const title = new TextView(this);
+    title.setText("📺 控制面板");
+    title.setTextColor(Color.WHITE);
+    title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18.0.toFloat());
+    title.setGravity(Gravity.CENTER);
+    title.setPadding(0, 0, 0, dp(8));
+    this.panelView!.addView(title);
+
+    // 按钮数据
+    const buttons = [
+      { text: "⬆ 上一个", action: "swipe_up" },
+      { text: "⬇ 下一个", action: "swipe_down" },
+      { text: "🔊 音量 +", action: "volume_up" },
+      { text: "🔉 音量 -", action: "volume_down" },
+      { text: "🔒 退出", action: "exit" }
+    ];
+
+    for (const btnData of buttons) {
+      const btn = this.createPanelButton(btnData.text as string, btnData.action as string, dp);
+      const btnParams = new LinearLayout.LayoutParams(
+        dp(180),
+        dp(56)
+      );
+      btnParams.setMargins(0, dp(6), 0, dp(6));
+      btn.setLayoutParams(btnParams);
+      this.panelView!.addView(btn);
+    }
+
+    // 面板 LayoutParams
+    this.panelParams = new LayoutParams(
+      LayoutParams.WRAP_CONTENT,
+      LayoutParams.WRAP_CONTENT,
+      LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+      LayoutParams.FLAG_NOT_FOCUSABLE,
+      PixelFormat.TRANSLUCENT
+    );
+    this.panelParams!.gravity = Gravity.CENTER_VERTICAL | Gravity.END;
+    this.panelParams!.x = dp(16);
+
+    // 面板拖动
+    this.panelView!.setOnTouchListener(new PanelTouchListener(service));
+
+    this.wm?.addView(this.panelView!, this.panelParams!);
+  }
+
+  /**
+   * 创建面板按钮
+   */
+  private createPanelButton(text: string, action: string, dp: (value: number) => Int): Button {
+    const service = this;
+    const btn = new Button(this);
+    btn.setText(text);
+    btn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 20.0.toFloat());
+    btn.setTextColor(Color.WHITE);
+    btn.setAllCaps(false);
+
+    // 按钮背景
+    const btnBg = new GradientDrawable();
+    if (action == "exit") {
+      btnBg.setColor(Color.parseColor("#CC_E74C3C"));
+    } else {
+      btnBg.setColor(Color.parseColor("#CC_3498DB"));
+    }
+    btnBg.setCornerRadius(dp(12).toFloat());
+    btn.setBackground(btnBg);
+
+    btn.setOnClickListener(new PanelButtonClickListener(service, action));
+
+    return btn;
+  }
+
+  /**
+   * 处理面板按钮点击
+   */
+  handlePanelAction(action: string): void {
+    switch (action) {
+      case "swipe_up":
+        this.performSwipeGesture(true);
+        break;
+      case "swipe_down":
+        this.performSwipeGesture(false);
+        break;
+      case "volume_up": {
+        const am = this.getSystemService(Context.AUDIO_SERVICE) as AudioManager;
+        am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_RAISE, AudioManager.FLAG_SHOW_UI);
+        break;
+      }
+      case "volume_down": {
+        const am2 = this.getSystemService(Context.AUDIO_SERVICE) as AudioManager;
+        am2.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_LOWER, AudioManager.FLAG_SHOW_UI);
+        break;
+      }
+      case "exit":
+        this.showPasswordDialog();
+        break;
+    }
+  }
+
+  /**
+   * 执行滑动手势（使用无障碍服务的 dispatchGesture）
+   */
+  private performSwipeGesture(isUp: boolean): void {
+    const displayMetrics = this.getResources().getDisplayMetrics();
+    const screenWidth = displayMetrics.widthPixels;
+    const screenHeight = displayMetrics.heightPixels;
+
+    const centerX = (screenWidth / 2).toFloat();
+    const startY = isUp ? (screenHeight * 0.7).toFloat() : (screenHeight * 0.3).toFloat();
+    const endY = isUp ? (screenHeight * 0.3).toFloat() : (screenHeight * 0.7).toFloat();
+
+    const path = new Path();
+    path.moveTo(centerX, startY);
+    path.lineTo(centerX, endY);
+
+    // 先临时移除蒙层以允许手势传递
+    if (this.maskView != null) {
+      this.wm?.removeView(this.maskView!);
+    }
+
+    const gestureBuilder = new GestureDescription.Builder();
+    gestureBuilder.addStroke(new GestureDescription.StrokeDescription(path, 0, 300));
+
+    this.dispatchGesture(gestureBuilder.build(), new SwipeGestureCallback(this), null);
+  }
+
+  /**
+   * 手势完成后恢复蒙层
+   */
+  restoreMaskAfterGesture(): void {
+    this.handler?.postDelayed(new RestoreMaskRunnable(this), 350);
+  }
+
+  /**
+   * 重新添加蒙层 View
+   */
+  reAddMaskView(): void {
+    if (this.maskView == null) {
+      this.createMaskView();
+    } else {
+      const params = new LayoutParams(
+        LayoutParams.MATCH_PARENT,
+        LayoutParams.MATCH_PARENT,
+        LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+        LayoutParams.FLAG_NOT_FOCUSABLE |
+        LayoutParams.FLAG_LAYOUT_IN_SCREEN |
+        LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+        PixelFormat.TRANSLUCENT
+      );
+      try {
+        this.wm?.addView(this.maskView!, params as LayoutParams);
+      } catch (e) {
+        // View 可能已被添加
+      }
+    }
+  }
+
+  /**
+   * 处理蒙层上的手势（在蒙层上的滑动转为切换视频）
+   */
+  handleMaskTouch(event: MotionEvent): boolean {
+    switch (event.getAction()) {
+      case MotionEvent.ACTION_DOWN:
+        this.startX = event.getRawX();
+        this.startY = event.getRawY();
+        return true;
+      case MotionEvent.ACTION_UP: {
+        const deltaX = event.getRawX() - this.startX;
+        const deltaY = event.getRawY() - this.startY;
+
+        // 判断是否为垂直滑动
+        if (Math.abs(deltaY) > this.SWIPE_THRESHOLD && Math.abs(deltaY) > Math.abs(deltaX) * 1.5) {
+          // 垂直滑动 -> 切换视频
+          const isUp = deltaY < 0;
+          this.performSwipeGesture(isUp);
+        }
+        // 其他操作（点击、水平滑动）全部拦截
+        return true;
+      }
+      default:
+        return true;
+    }
+  }
+
+  /**
+   * 显示密码验证弹窗
+   */
+  private showPasswordDialog(): void {
+    const service = this;
+    const password = MaskAccessibilityService.unlockPassword;
+
+    // 如果没有设置密码，直接退出
+    if (password == "" || password.length == 0) {
+      this.removeMask();
+      return;
+    }
+
+    // 临时移除蒙层以显示对话框
+    if (this.maskView != null) {
+      this.wm?.removeView(this.maskView!);
+    }
+
+    // 创建密码输入框
+    const input = new EditText(this);
+    input.setHint("请输入退出密码");
+    input.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22.0.toFloat());
+    input.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD);
+    const density = this.getResources().getDisplayMetrics().density;
+    const padding = (24 * density).toInt();
+    input.setPadding(padding, padding, padding, padding);
+
+    // 创建对话框容器
+    const container = new LinearLayout(this);
+    container.setOrientation(LinearLayout.VERTICAL);
+    container.setPadding(padding, padding, padding, 0);
+    container.addView(input);
+
+    // 使用 WindowManager 添加对话框
+    const dialogLayout = new LinearLayout(this);
+    dialogLayout.setOrientation(LinearLayout.VERTICAL);
+    dialogLayout.setGravity(Gravity.CENTER);
+    dialogLayout.setBackgroundColor(Color.parseColor("#99000000"));
+
+    const dialogBg = new GradientDrawable();
+    dialogBg.setColor(Color.parseColor("#FF1a1a2e"));
+    dialogBg.setCornerRadius((16 * density).toFloat());
+    dialogBg.setStroke((2 * density).toInt(), Color.parseColor("#4DFFFFFF"));
+
+    const dialogContent = new LinearLayout(this);
+    dialogContent.setOrientation(LinearLayout.VERTICAL);
+    dialogContent.setBackground(dialogBg);
+    dialogContent.setPadding(padding, padding, padding, padding);
+
+    const titleTv = new TextView(this);
+    titleTv.setText("🔒 输入退出密码");
+    titleTv.setTextColor(Color.WHITE);
+    titleTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22.0.toFloat());
+    titleTv.setGravity(Gravity.CENTER);
+    titleTv.setPadding(0, 0, 0, padding);
+    dialogContent.addView(titleTv);
+    dialogContent.addView(input);
+
+    // 按钮行
+    const btnRow = new LinearLayout(this);
+    btnRow.setOrientation(LinearLayout.HORIZONTAL);
+    btnRow.setGravity(Gravity.CENTER);
+    btnRow.setPadding(0, padding, 0, 0);
+
+    const cancelBtn = new Button(this);
+    cancelBtn.setText("取消");
+    cancelBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18.0.toFloat());
+    cancelBtn.setTextColor(Color.WHITE);
+    const cancelBg = new GradientDrawable();
+    cancelBg.setColor(Color.parseColor("#CC666666"));
+    cancelBg.setCornerRadius((12 * density).toFloat());
+    cancelBtn.setBackground(cancelBg);
+    cancelBtn.setOnClickListener(new CancelButtonClickListener(service, dialogLayout));
+
+    const confirmBtn = new Button(this);
+    confirmBtn.setText("确认");
+    confirmBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18.0.toFloat());
+    confirmBtn.setTextColor(Color.WHITE);
+    const confirmBg = new GradientDrawable();
+    confirmBg.setColor(Color.parseColor("#CC3498DB"));
+    confirmBg.setCornerRadius((12 * density).toFloat());
+    confirmBtn.setBackground(confirmBg);
+    confirmBtn.setOnClickListener(new ConfirmButtonClickListener(service, dialogLayout, input, password));
+
+    const btnParams = new LinearLayout.LayoutParams(
+      (120 * density).toInt(),
+      (48 * density).toInt()
+    );
+    btnParams.setMargins((8 * density).toInt(), 0, (8 * density).toInt(), 0);
+    cancelBtn.setLayoutParams(btnParams);
+    confirmBtn.setLayoutParams(btnParams);
+
+    btnRow.addView(cancelBtn);
+    btnRow.addView(confirmBtn);
+    dialogContent.addView(btnRow);
+
+    const dialogContentParams = new LinearLayout.LayoutParams(
+      (320 * density).toInt(),
+      LinearLayout.LayoutParams.WRAP_CONTENT
+    );
+    dialogContent.setLayoutParams(dialogContentParams);
+    dialogLayout.addView(dialogContent);
+
+    const dialogParams = new LayoutParams(
+      LayoutParams.MATCH_PARENT,
+      LayoutParams.MATCH_PARENT,
+      LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+      LayoutParams.FLAG_NOT_FOCUSABLE,
+      PixelFormat.TRANSLUCENT
+    );
+
+    this.wm?.addView(dialogLayout, dialogParams as LayoutParams);
+  }
+
+  /**
+   * 处理面板拖动
+   */
+  handlePanelDrag(event: MotionEvent): boolean {
+    if (this.panelParams == null) return false;
+
+    switch (event.getAction()) {
+      case MotionEvent.ACTION_DOWN:
+        this.panelStartX = event.getRawX();
+        this.panelStartY = event.getRawY();
+        this.isDraggingPanel = false;
+        return true;
+      case MotionEvent.ACTION_MOVE: {
+        const deltaX = event.getRawX() - this.panelStartX;
+        const deltaY = event.getRawY() - this.panelStartY;
+        if (Math.abs(deltaX) > 10 || Math.abs(deltaY) > 10) {
+          this.isDraggingPanel = true;
+          this.panelParams!.x -= deltaX.toInt();
+          this.panelParams!.y += deltaY.toInt();
+          this.wm?.updateViewLayout(this.panelView!, this.panelParams!);
+          this.panelStartX = event.getRawX();
+          this.panelStartY = event.getRawY();
+        }
+        return true;
+      }
+      case MotionEvent.ACTION_UP:
+        return this.isDraggingPanel;
+      default:
+        return false;
+    }
+  }
+}
+
+// ============ 辅助类 ============
+
+class MaskBroadcastReceiver extends BroadcastReceiver {
+  private service: MaskAccessibilityService;
+  constructor(service: MaskAccessibilityService) {
+    super();
+    this.service = service;
+  }
+  override onReceive(context: Context, intent: Intent): void {
+    const action = intent.getAction();
+    if (action == "com.tiktok.mask.ACTION_START_MASK") {
+      this.service.showMask();
+    } else if (action == "com.tiktok.mask.ACTION_STOP_MASK") {
+      this.service.removeMask();
+    }
+  }
+}
+
+class MaskTouchListener implements View.OnTouchListener {
+  private service: MaskAccessibilityService;
+  constructor(service: MaskAccessibilityService) {
+    this.service = service;
+  }
+  override onTouch(v: View, event: MotionEvent): boolean {
+    return this.service.handleMaskTouch(event);
+  }
+}
+
+class PanelTouchListener implements View.OnTouchListener {
+  private service: MaskAccessibilityService;
+  constructor(service: MaskAccessibilityService) {
+    this.service = service;
+  }
+  override onTouch(v: View, event: MotionEvent): boolean {
+    return this.service.handlePanelDrag(event);
+  }
+}
+
+class PanelButtonClickListener implements View.OnClickListener {
+  private service: MaskAccessibilityService;
+  private action: string;
+  constructor(service: MaskAccessibilityService, action: string) {
+    this.service = service;
+    this.action = action;
+  }
+  override onClick(v: View): void {
+    this.service.handlePanelAction(this.action);
+  }
+}
+
+class SwipeGestureCallback extends AccessibilityService.GestureResultCallback {
+  private service: MaskAccessibilityService;
+  constructor(service: MaskAccessibilityService) {
+    super();
+    this.service = service;
+  }
+  override onCompleted(gestureDescription: GestureDescription): void {
+    super.onCompleted(gestureDescription);
+    this.service.restoreMaskAfterGesture();
+  }
+  override onCancelled(gestureDescription: GestureDescription): void {
+    super.onCancelled(gestureDescription);
+    this.service.restoreMaskAfterGesture();
+  }
+}
+
+class RestoreMaskRunnable implements Runnable {
+  private service: MaskAccessibilityService;
+  constructor(service: MaskAccessibilityService) {
+    this.service = service;
+  }
+  override run(): void {
+    this.service.reAddMaskView();
+  }
+}
+
+class CancelButtonClickListener implements View.OnClickListener {
+  private service: MaskAccessibilityService;
+  private dialogLayout: LinearLayout;
+  constructor(service: MaskAccessibilityService, dialogLayout: LinearLayout) {
+    this.service = service;
+    this.dialogLayout = dialogLayout;
+  }
+  override onClick(v: View): void {
+    const wm = this.service.getSystemService(Context.WINDOW_SERVICE) as WindowManager;
+    wm.removeView(this.dialogLayout);
+    this.service.reAddMaskView();
+  }
+}
+
+class ConfirmButtonClickListener implements View.OnClickListener {
+  private service: MaskAccessibilityService;
+  private dialogLayout: LinearLayout;
+  private input: EditText;
+  private password: string;
+  constructor(service: MaskAccessibilityService, dialogLayout: LinearLayout, input: EditText, password: string) {
+    this.service = service;
+    this.dialogLayout = dialogLayout;
+    this.input = input;
+    this.password = password;
+  }
+  override onClick(v: View): void {
+    const inputText = this.input.getText().toString();
+    const wm = this.service.getSystemService(Context.WINDOW_SERVICE) as WindowManager;
+    if (inputText == this.password) {
+      wm.removeView(this.dialogLayout);
+      this.service.removeMask();
+    } else {
+      this.input.setText("");
+      this.input.setHint("密码错误，请重试");
+      this.input.setHintTextColor(Color.parseColor("#E74C3C"));
+    }
+  }
+}

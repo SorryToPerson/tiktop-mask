@@ -1,0 +1,15 @@
+{
+  "id": "tiktok-mask-plugin",
+  "displayName": "抖音蒙层插件",
+  "version": "1.0.0",
+  "description": "为老年人提供抖音防误触蒙层服务",
+  "uni_modules": {
+    "type": "uts",
+    "plugins": {
+      "android": {
+        "integrateType": "aar",
+        "minSdkVersion": 26
+      }
+    }
+  }
+}

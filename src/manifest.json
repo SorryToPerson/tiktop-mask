@@ -1,0 +1,62 @@
+{
+  "name": "长辈刷视频",
+  "appid": "__UNI__620BF53",
+  "description": "帮助老年人简化抖音操作，防止误触",
+  "versionName": "1.0.0",
+  "versionCode": "100",
+  "transformPx": false,
+  "app-plus": {
+    "usingComponents": true,
+    "nvueStyleCompiler": "uni-app",
+    "compilerVersion": 3,
+    "splashscreen": {
+      "alwaysShowBeforeRender": true,
+      "waiting": true,
+      "autoclose": true,
+      "delay": 0
+    },
+    "modules": {},
+    "nativePlugins": {
+      "tiktok-mask-plugin": {
+        "__plugin_info__": {
+          "name": "tiktok-mask-plugin",
+          "description": "长辈刷视频面具插件",
+          "platforms": "Android",
+          "url": "",
+          "android_package_name": "",
+          "ios_bundle_id": "",
+          "isCloud": false,
+          "bought": -1,
+          "pid": "",
+          "parameters": {}
+        }
+      }
+    },
+    "distribute": {
+      "android": {
+        "permissions": [
+          "<uses-permission android:name=\"android.permission.SYSTEM_ALERT_WINDOW\"/>",
+          "<uses-permission android:name=\"android.permission.RECEIVE_BOOT_COMPLETED\"/>",
+          "<uses-permission android:name=\"android.permission.FOREGROUND_SERVICE\"/>",
+          "<uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\"/>",
+          "<uses-permission android:name=\"android.permission.WAKE_LOCK\"/>"
+        ],
+        "minSdkVersion": 26
+      },
+      "ios": {},
+      "sdkConfigs": {}
+    }
+  },
+  "quickapp": {},
+  "mp-weixin": {
+    "appid": "",
+    "setting": {
+      "urlCheck": false
+    },
+    "usingComponents": true
+  },
+  "uniStatistics": {
+    "enable": false
+  },
+  "vueVersion": "3"
+}

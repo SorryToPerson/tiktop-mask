@@ -1,0 +1,25 @@
+import BroadcastReceiver from "android.content.BroadcastReceiver";
+import Context from "android.content.Context";
+import Intent from "android.content.Intent";
+
+/**
+ * 开机自启广播接收器
+ * 监听 BOOT_COMPLETED 广播，自动启动蒙层服务
+ */
+export class BootReceiver extends BroadcastReceiver {
+  override onReceive(context: Context, intent: Intent): void {
+    if (intent.getAction() == Intent.ACTION_BOOT_COMPLETED) {
+      // 获取 uni 框架的 SharedPreferences
+      const sp = context.getSharedPreferences("uni-storage", Context.MODE_PRIVATE);
+      // uni.setStorageSync 存储布尔值时会转为字符串格式，或者可能是原始 boolean，我们通过 contains 检查
+      const autoStart = sp.getBoolean("mask_auto_start", false) || sp.getString("mask_auto_start", "false") === "true";
+      
+      if (autoStart) {
+        // 开机后发送启动蒙层的广播
+        const startIntent = new Intent("com.tiktok.mask.ACTION_START_MASK");
+        startIntent.setPackage(context.getPackageName());
+        context.sendBroadcast(startIntent);
+      }
+    }
+  }
+}

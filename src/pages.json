@@ -1,0 +1,18 @@
+{
+	"pages": [
+		{
+			"path": "pages/index/index",
+			"style": {
+				"navigationBarTitleText": "长辈刷视频",
+				"navigationBarBackgroundColor": "#1a1a2e",
+				"navigationBarTextStyle": "white"
+			}
+		}
+	],
+	"globalStyle": {
+		"navigationBarTextStyle": "white",
+		"navigationBarTitleText": "长辈刷视频",
+		"navigationBarBackgroundColor": "#1a1a2e",
+		"backgroundColor": "#1a1a2e"
+	}
+}

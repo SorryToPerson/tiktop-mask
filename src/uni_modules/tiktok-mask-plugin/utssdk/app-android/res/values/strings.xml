@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="accessibility_service_desc">长辈刷视频辅助服务，用于在抖音界面上显示防误触蒙层，帮助老年人安全浏览视频。</string>
+    <string name="app_name">长辈刷视频</string>
+</resources>
