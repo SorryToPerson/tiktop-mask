@@ -1,13 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="io.dcloud.uni_modules.tiktok_mask_plugin">
+    package="uts.sdk.modules.tiktokMaskPlugin">
 
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
 
     <application>
-        <!-- 无障碍服务 -->
         <service
             android:name=".MaskAccessibilityService"
             android:exported="true"

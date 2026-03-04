@@ -42,7 +42,21 @@ export class MaskAccessibilityService extends AccessibilityService {
   }
 
   /** 蒙层是否正在显示 */
-  static isMaskShowing: boolean = false;
+  static get isMaskShowing(): boolean {
+    const context = UTSAndroid.getAppContext();
+    if (context == null) return false;
+    const sp = context.getSharedPreferences("tiktok_mask_prefs", Context.MODE_PRIVATE);
+    return sp.getBoolean("is_mask_showing", false);
+  }
+
+  static set isMaskShowing(value: boolean) {
+    const context = UTSAndroid.getAppContext();
+    if (context != null) {
+      const sp = context.getSharedPreferences("tiktok_mask_prefs", Context.MODE_PRIVATE);
+      sp.edit().putBoolean("is_mask_showing", value).apply();
+    }
+  }
+
   /** 解锁密码 */
   static unlockPassword: string = "";
 
@@ -69,10 +83,15 @@ export class MaskAccessibilityService extends AccessibilityService {
   private isDraggingPanel: boolean = false;
 
   override onServiceConnected(): void {
-    super.onServiceConnected();
-    this.handler = new Handler(Looper.getMainLooper());
-    this.wm = this.getSystemService(Context.WINDOW_SERVICE) as WindowManager;
-    this.registerMaskReceiver();
+    try {
+      super.onServiceConnected();
+      this.handler = new Handler(Looper.getMainLooper());
+      this.wm = this.getSystemService(Context.WINDOW_SERVICE) as WindowManager;
+      this.registerMaskReceiver();
+      console.log("MaskAccessibilityService initialized successfully.");
+    } catch (e: Exception) {
+      console.error("MaskAccessibilityService init crash: ", e);
+    }
   }
 
   override onAccessibilityEvent(event: AccessibilityEvent): void {
@@ -99,10 +118,20 @@ export class MaskAccessibilityService extends AccessibilityService {
     filter.addAction("com.tiktok.mask.ACTION_START_MASK");
     filter.addAction("com.tiktok.mask.ACTION_STOP_MASK");
 
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-      this.registerReceiver(this.receiver, filter, Context.RECEIVER_NOT_EXPORTED);
-    } else {
-      this.registerReceiver(this.receiver, filter);
+    try {
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        // Context.RECEIVER_NOT_EXPORTED = 4
+        this.registerReceiver(this.receiver, filter, 4);
+      } else {
+        this.registerReceiver(this.receiver, filter);
+      }
+    } catch (e: Exception) {
+      console.error("registerReceiver error, fallback to default", e);
+      try {
+        this.registerReceiver(this.receiver, filter);
+      } catch (e2: Exception) {
+        console.error("registerReceiver fallback also failed", e2);
+      }
     }
   }
 
@@ -145,21 +174,22 @@ export class MaskAccessibilityService extends AccessibilityService {
   private createMaskView(): void {
     const service = this;
 
-    // 创建透明 View
+    // 创建半透明红色 View 供调试和提示
     this.maskView = new View(this);
-    this.maskView!.setBackgroundColor(Color.parseColor("#02000000"));
+    this.maskView!.setBackgroundColor(Color.parseColor("#44FF0000"));
 
     // 设置触摸事件监听 —— 核心手势过滤逻辑
     this.maskView!.setOnTouchListener(new MaskTouchListener(service));
 
-    // LayoutParams
+    // LayoutParams - FLAG_WATCH_OUTSIDE_TOUCH is added to occasionally detect if we missed touches
     const params = new LayoutParams(
       LayoutParams.MATCH_PARENT,
       LayoutParams.MATCH_PARENT,
       LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
       LayoutParams.FLAG_NOT_FOCUSABLE |
       LayoutParams.FLAG_LAYOUT_IN_SCREEN |
-      LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+      LayoutParams.FLAG_LAYOUT_NO_LIMITS |
+      LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
       PixelFormat.TRANSLUCENT
     );
 
@@ -334,7 +364,8 @@ export class MaskAccessibilityService extends AccessibilityService {
         LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
         LayoutParams.FLAG_NOT_FOCUSABLE |
         LayoutParams.FLAG_LAYOUT_IN_SCREEN |
-        LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+        LayoutParams.FLAG_LAYOUT_NO_LIMITS |
+        LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
         PixelFormat.TRANSLUCENT
       );
       try {
@@ -516,7 +547,6 @@ export class MaskAccessibilityService extends AccessibilityService {
       default:
         return false;
     }
-  }
 }
 
 // ============ 辅助类 ============
